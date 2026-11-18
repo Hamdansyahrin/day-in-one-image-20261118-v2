@@ -25,6 +25,34 @@ def png_dimensions(data):
     return width, height
 
 
+def check_png_trailer(data):
+    """Walk the PNG chunk stream and require a clean end at IEND.
+
+    Every chunk is length(4) + type(4) + data(length) + CRC(4). The file
+    must terminate exactly at the end of the IEND chunk: any byte after
+    IEND (or a missing IEND) means the file is corrupt or has data
+    smuggled past the image, and it is rejected.
+    """
+    pos = len(PNG_MAGIC)
+    seen_iend = False
+    while pos < len(data):
+        if pos + 8 > len(data):
+            raise ValueError("truncated PNG chunk header")
+        length = struct.unpack(">I", data[pos:pos + 4])[0]
+        ctype = data[pos + 4:pos + 8]
+        end = pos + 8 + length + 4
+        if end > len(data):
+            raise ValueError("truncated PNG chunk body")
+        pos = end
+        if ctype == b"IEND":
+            seen_iend = True
+            break
+    if not seen_iend:
+        raise ValueError("PNG has no IEND chunk")
+    if pos != len(data):
+        raise ValueError("trailing data after PNG IEND")
+
+
 def jpeg_dimensions(data):
     """(width, height) from the first SOF marker of a JPEG byte string."""
     i = 2
@@ -46,6 +74,7 @@ def validate(data):
         raise ValueError(f"entry is {len(data)} bytes, over the 1 MiB cap")
     if data.startswith(PNG_MAGIC):
         width, height = png_dimensions(data)
+        check_png_trailer(data)
     elif data.startswith(JPEG_MAGIC):
         width, height = jpeg_dimensions(data)
     else:
